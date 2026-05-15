@@ -28,4 +28,4 @@ ENV FLASK_APP=app.py
 ENV FLASK_ENV=production
 
 # Run the application
-CMD ["python", "app.py"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "--timeout", "300", "--workers", "1", "app:app"]

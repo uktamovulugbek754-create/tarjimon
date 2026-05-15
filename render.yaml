@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: tarjimon
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: DEEPL_API_KEY
+        sync: false
+      - key: HUGGINGFACE_TOKEN
+        sync: false
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "False"
