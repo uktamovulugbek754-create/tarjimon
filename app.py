@@ -224,55 +224,77 @@ def _fmt_time(seconds):
 def parse_transcript_file(txt_path):
     """
     Qo'lda yozilgan transkripsiya txt faylini o'qiydi.
-    Format (har bir qatorda):  0:00 Arabcha matn
-                               1:45 Keyingi gap
-    Timestamps bo'lmasa — qatorlar ketma-ket joylashtiriladi (5 soniya interval).
+
+    Qo'llab-quvvatlanadigan formatlar:
+      A) "0:00 Arabcha matn"   — timestamp va matn bir qatorda (bo'sh joy bilan yoki bo'lmay)
+      B) Timestamp alohida qatorda, keyin arabcha matn alohida qatorda:
+           0:08
+           8 seconds
+           وقتها قوم لوت...
+    "8 seconds", "2 minutes, 30 seconds" kabi inglizcha tavsiflar o'tkazib yuboriladi.
     """
     import re
-    lines = []
-    with open(txt_path, 'r', encoding='utf-8-sig') as f:
-        for raw in f:
-            raw = raw.strip()
-            if not raw:
-                continue
-            m = re.match(r'^(\d+):(\d{2})(?::(\d{2}))?\s+(.*)', raw)
-            if m:
-                h_or_m = int(m.group(1))
-                mins   = int(m.group(2))
-                secs   = int(m.group(3)) if m.group(3) else 0
-                # "m:ss" formatida: h_or_m = daqiqa
-                total_sec = h_or_m * 60 + mins + (secs if m.group(3) else 0)
-                if m.group(3):
-                    # "h:mm:ss" formatida
-                    total_sec = h_or_m * 3600 + mins * 60 + secs
-                text = m.group(4).strip()
-                time_label = m.group(0).split(' ')[0]
-            else:
-                # Timestamp yo'q — oxirgiga qo'shib yubor
-                if lines:
-                    lines[-1] = (lines[-1][0], lines[-1][1], lines[-1][2] + ' ' + raw)
-                else:
-                    lines.append((0, '0:00', raw))
-                continue
-            if text:
-                lines.append((total_sec, time_label, text))
 
-    if not lines:
+    def is_arabic(text):
+        return bool(re.search(r'[؀-ۿ]', text))
+
+    def parse_time(ts):
+        parts = ts.split(':')
+        if len(parts) == 2:
+            return int(parts[0]) * 60 + int(parts[1])
+        return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+
+    with open(txt_path, 'r', encoding='utf-8-sig') as f:
+        raw_lines = [ln.strip() for ln in f.read().splitlines()]
+
+    entries = []          # (start_sec, time_label, arabic_text)
+    cur_time  = None
+    cur_label = None
+    pending   = []        # arabcha matn parchalar
+
+    for line in raw_lines:
+        if not line:
+            continue
+
+        # Timestamp bor qatormi? (boshida M:SS yoki H:MM:SS)
+        m = re.match(r'^(\d+:\d{2}(?::\d{2})?)(.*)', line)
+        if m:
+            # Oldingi segmentni saqlash
+            if cur_time is not None and pending:
+                entries.append((cur_time, cur_label, ' '.join(pending).strip()))
+            cur_time  = parse_time(m.group(1))
+            cur_label = m.group(1)
+            pending   = []
+            rest = m.group(2).strip()
+            # Timestamp bilan birga arabcha matn bor bo'lsa
+            if rest and is_arabic(rest):
+                pending.append(rest)
+        else:
+            # Arabcha matn qatori
+            if is_arabic(line) and cur_time is not None:
+                pending.append(line)
+            # "8 seconds", "2 minutes, 30 seconds" kabilar — o'tkazib yuboriladi
+
+    # Oxirgi entry
+    if cur_time is not None and pending:
+        entries.append((cur_time, cur_label, ' '.join(pending).strip()))
+
+    if not entries:
         return None, None
 
-    segments = []
+    segments  = []
     formatted = []
-    for i, (start, time_label, text) in enumerate(lines):
-        end = lines[i + 1][0] if i + 1 < len(lines) else start + 5
+    for i, (start, label, text) in enumerate(entries):
+        end = entries[i + 1][0] if i + 1 < len(entries) else start + 5
         if end <= start:
             end = start + 3
         segments.append({
             'start':      float(start),
             'end':        float(end),
             'text':       text,
-            'time_label': time_label,
+            'time_label': label,
         })
-        formatted.append(f"{time_label} {text}")
+        formatted.append(f"{label} {text}")
 
     return segments, "\n".join(formatted)
 
