@@ -34,6 +34,24 @@
                     <p><strong>Hajmi:</strong> <span id="fileSize"></span></p>
                 </div>
 
+                <!-- Transcript TXT upload -->
+                <div class="transcript-section">
+                    <h3>📄 Transkripsiya (ixtiyoriy)</h3>
+                    <p class="transcript-hint">Agar transkripsiyani o'zingiz yozsangiz — Whisper AI o'tkazib yuboriladi va jarayon tezroq bo'ladi.</p>
+                    <p class="transcript-hint">Format: <code>0:00 Arabcha matn</code> — har bir qatorda vaqt va matn</p>
+
+                    <div class="upload-area upload-area-sm" id="txtUploadArea">
+                        <div class="upload-icon">📝</div>
+                        <p class="upload-text">Transkripsiya .txt faylini shu yerga tashlang yoki bosing</p>
+                        <input type="file" id="txtInput" accept=".txt" hidden>
+                    </div>
+
+                    <div class="file-info" id="txtFileInfo" style="display: none;">
+                        <p><strong>Transkripsiya fayli:</strong> <span id="txtFileName"></span>
+                           <button id="txtRemoveBtn" class="btn-remove">✕ O'chirish</button></p>
+                    </div>
+                </div>
+
                 <button id="processBtn" class="btn btn-primary" disabled>
                     <span class="btn-text">🔄 Dubbl Qilishni Boshlash</span>
                     <span class="spinner" style="display: none;"></span>
@@ -67,7 +85,7 @@
                 <div class="progress-item">
                     <div class="progress-step" id="step3">
                         <span class="step-number">3</span>
-                        <span class="step-text">Arab tilidagi audioni matnga aylantirish (Whisper AI)</span>
+                        <span class="step-text" id="step3Text">Arab tilidagi audioni matnga aylantirish (Whisper AI)</span>
                         <span class="step-percent" id="percent3">0%</span>
                     </div>
                     <div class="progress-bar" id="progressBar3"><div class="progress-fill"></div></div>

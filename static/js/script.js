@@ -28,10 +28,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const videoPlayer        = document.getElementById('videoPlayer');
     const videoSource        = document.getElementById('videoSource');
 
+    // Transcript txt
+    const txtUploadArea = document.getElementById('txtUploadArea');
+    const txtInput      = document.getElementById('txtInput');
+    const txtFileInfo   = document.getElementById('txtFileInfo');
+    const txtFileName   = document.getElementById('txtFileName');
+    const txtRemoveBtn  = document.getElementById('txtRemoveBtn');
+    const step3Text     = document.getElementById('step3Text');
+
     const VIDEO_EXTS = ['mp4','mkv','avi','mov','webm','flv','wmv','m4v'];
 
-    let selectedFile = null;
+    let selectedFile   = null;
+    let selectedTxtFile = null;
 
+    // ── Audio/Video upload ────────────────────────────────────
     uploadArea.addEventListener('click', () => audioInput.click());
 
     uploadArea.addEventListener('dragover', (e) => {
@@ -56,7 +66,6 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleFileSelect(file) {
         const ext = file.name.split('.').pop().toLowerCase();
         const isVideo = VIDEO_EXTS.includes(ext);
-        const isAudio = file.type.startsWith('audio/') || isVideo === false;
 
         if (!file.type.startsWith('audio/') && !file.type.startsWith('video/') && !isVideo) {
             showError('Iltimos, audio yoki video fayl tanlang!');
@@ -76,6 +85,50 @@ document.addEventListener('DOMContentLoaded', function() {
         errorSection.style.display = 'none';
     }
 
+    // ── Transcript TXT upload ─────────────────────────────────
+    txtUploadArea.addEventListener('click', () => txtInput.click());
+
+    txtUploadArea.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        txtUploadArea.classList.add('dragover');
+    });
+
+    txtUploadArea.addEventListener('dragleave', () => {
+        txtUploadArea.classList.remove('dragover');
+    });
+
+    txtUploadArea.addEventListener('drop', (e) => {
+        e.preventDefault();
+        txtUploadArea.classList.remove('dragover');
+        const f = e.dataTransfer.files[0];
+        if (f) handleTxtSelect(f);
+    });
+
+    txtInput.addEventListener('change', (e) => {
+        if (e.target.files.length > 0) handleTxtSelect(e.target.files[0]);
+    });
+
+    txtRemoveBtn.addEventListener('click', () => {
+        selectedTxtFile = null;
+        txtInput.value = '';
+        txtFileInfo.style.display = 'none';
+        txtUploadArea.style.display = 'block';
+        step3Text.textContent = 'Arab tilidagi audioni matnga aylantirish (Whisper AI)';
+    });
+
+    function handleTxtSelect(file) {
+        if (!file.name.endsWith('.txt')) {
+            showError('Iltimos, .txt formatdagi fayl tanlang!');
+            return;
+        }
+        selectedTxtFile = file;
+        txtFileName.textContent = file.name;
+        txtFileInfo.style.display = 'block';
+        txtUploadArea.style.display = 'none';
+        step3Text.textContent = 'Qo\'lda yozilgan transkripsiya o\'qilmoqda (.txt)';
+    }
+
+    // ── Process button ────────────────────────────────────────
     processBtn.addEventListener('click', async () => {
         if (!selectedFile) return;
         await processAudio(selectedFile);
@@ -87,6 +140,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function processAudio(file) {
         const formData = new FormData();
         formData.append('audio', file);
+        if (selectedTxtFile) formData.append('transcript', selectedTxtFile);
 
         progressSection.style.display = 'block';
         resultsSection.style.display  = 'none';
@@ -230,9 +284,13 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function resetForm() {
-        selectedFile = null;
+        selectedFile    = null;
+        selectedTxtFile = null;
         audioInput.value = '';
+        txtInput.value   = '';
         fileInfo.style.display        = 'none';
+        txtFileInfo.style.display     = 'none';
+        txtUploadArea.style.display   = 'block';
         processBtn.disabled           = true;
         progressSection.style.display = 'none';
         resultsSection.style.display  = 'none';
@@ -245,6 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
         speakerCount.textContent   = '';
         audioSource.src = '';
         videoSource.src = '';
+        step3Text.textContent = 'Arab tilidagi audioni matnga aylantirish (Whisper AI)';
 
         // Progress reset
         document.querySelectorAll('.step-percent').forEach(p => { p.textContent = '0%'; p.classList.remove('completed'); });

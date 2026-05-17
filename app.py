@@ -93,19 +93,17 @@ def process_audio():
     """
     Pipeline:
       1. (Video) ffmpeg → audio
-      2. pyannote — speaker count (ixtiyoriy)
-      3. Groq Whisper verbose_json — timestamped segments
+      2. Notiqlarni aniqlash (LLM orqali)
+      3a. Groq Whisper — avtomatik transkripsiya  (txt yuklanmagan bo'lsa)
+      3b. txt fayl — qo'lda transkripsiya         (txt yuklanganida Whisper o'tkazib yuboriladi)
       4. DeepL — har bir segment tarjima
       5. Edge TTS — har bir segmentni to'g'ri vaqtga joylashtirish
       6. pydub — dubbed audio + original audio (past volume) aralashtiriladi
       7. (Video) ffmpeg — dubbed audio videoga qaytariladi
     """
     try:
-        if not GROQ_API_KEY:
-            return jsonify({'error': 'GROQ_API_KEY sozlanmagan.'}), 500
-
         if 'audio' not in request.files:
-            return jsonify({'error': 'Fayl kiritilmagan'}), 400
+            return jsonify({'error': 'Audio/video fayl kiritilmagan'}), 400
 
         audio_file = request.files['audio']
         if audio_file.filename == '':
@@ -124,35 +122,43 @@ def process_audio():
             except Exception as e:
                 return jsonify({'error': f'Videodan audio ajratib bo\'lmadi: {e}'}), 500
         else:
-            # Audio fayl ham Groq uchun compress qilinadi (25MB limit)
             try:
                 audio_for_pipeline = compress_audio(upload_path)
             except Exception:
                 audio_for_pipeline = upload_path
 
-        # ── Step 2: Speaker detection — LLM orqali (PyTorchsiz) ─
-        # pyannote local modeli PyTorch xatosi beradi, shuning uchun
-        # Groq LLM transkripsiya matnidan notiqlarni tahlil qiladi.
-        # (Haqiqiy aniqlash Step 3 dan keyin — segments tayyorlanib bo'lgach)
-        num_speakers = 1  # keyinchalik yangilanadi
+        num_speakers = 1
 
-        # ── Step 3: Whisper — timestamped transcription ───────
-        segments, formatted_arabic = transcribe_with_timestamps(audio_for_pipeline)
-        if not segments:
-            return jsonify({'error': 'Audio matnini aniqlab bo\'lmadi. Audio sifatini tekshiring.'}), 400
+        # ── Step 3: Transkripsiya (txt yoki Whisper) ──────────
+        txt_file = request.files.get('transcript')
+        used_manual_transcript = False
+
+        if txt_file and txt_file.filename.endswith('.txt'):
+            txt_path = os.path.join(app.config['UPLOAD_FOLDER'], 'transcript.txt')
+            txt_file.save(txt_path)
+            segments, formatted_arabic = parse_transcript_file(txt_path)
+            used_manual_transcript = True
+            if not segments:
+                return jsonify({'error': 'Transkripsiya fayli bo\'sh yoki noto\'g\'ri formatda.'}), 400
+        else:
+            if not GROQ_API_KEY:
+                return jsonify({'error': 'GROQ_API_KEY sozlanmagan. Transkripsiya txt faylini yuklang yoki API kalitni qo\'shing.'}), 500
+            segments, formatted_arabic = transcribe_with_timestamps(audio_for_pipeline)
+            if not segments:
+                return jsonify({'error': 'Audio matnini aniqlab bo\'lmadi. Audio sifatini tekshiring.'}), 400
 
         # ── Step 2b: Notiqlarni matn orqali aniqlash ─────────
         try:
             num_speakers = detect_speakers_from_text(segments)
         except Exception as e:
-            print(f"[Step 2b] Speaker detection skipped: {e}")
+            print(f"[Speaker detection] skipped: {e}")
 
-        # ── Step 3b: Har bir segmentga notiq raqami berish ───────
+        # ── Step 3b: Har bir segmentga notiq raqami berish ───
         speaker_labels = assign_speakers(segments, num_speakers)
         for i, seg in enumerate(segments):
             seg['speaker'] = speaker_labels[i] if i < len(speaker_labels) else 1
 
-        # ── Step 4: Segment-by-segment translation ────────────
+        # ── Step 4: Tarjima ───────────────────────────────────
         translated_segments = translate_segments(segments)
         formatted_english = format_segments(translated_segments, use_translated=True)
 
@@ -174,7 +180,6 @@ def process_audio():
             return jsonify({'error': 'Inglizcha audio yaratib bo\'lmadi'}), 400
 
         # ── Step 6: Mix dubbed + original audio ───────────────
-        # Background olib tashlanmaydi — original audio past ovozda qoladi
         output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'output_audio.mp3')
         try:
             mix_dubbed_with_original(dubbed_path, audio_for_pipeline, output_path)
@@ -192,13 +197,14 @@ def process_audio():
                 is_video = False
 
         return jsonify({
-            'success':         True,
-            'original_text':   formatted_arabic,
-            'translated_text': formatted_english,
-            'num_speakers':    num_speakers,
-            'is_video':        is_video,
-            'audio_url':       '/api/download-audio',
-            'video_url':       '/api/download-video' if is_video else None,
+            'success':                True,
+            'original_text':          formatted_arabic,
+            'translated_text':        formatted_english,
+            'num_speakers':           num_speakers,
+            'is_video':               is_video,
+            'used_manual_transcript': used_manual_transcript,
+            'audio_url':              '/api/download-audio',
+            'video_url':              '/api/download-video' if is_video else None,
         }), 200
 
     except Exception as e:
@@ -213,6 +219,62 @@ def _fmt_time(seconds):
     m = int(seconds // 60)
     s = int(seconds % 60)
     return f"{m}:{s:02d}"
+
+
+def parse_transcript_file(txt_path):
+    """
+    Qo'lda yozilgan transkripsiya txt faylini o'qiydi.
+    Format (har bir qatorda):  0:00 Arabcha matn
+                               1:45 Keyingi gap
+    Timestamps bo'lmasa — qatorlar ketma-ket joylashtiriladi (5 soniya interval).
+    """
+    import re
+    lines = []
+    with open(txt_path, 'r', encoding='utf-8-sig') as f:
+        for raw in f:
+            raw = raw.strip()
+            if not raw:
+                continue
+            m = re.match(r'^(\d+):(\d{2})(?::(\d{2}))?\s+(.*)', raw)
+            if m:
+                h_or_m = int(m.group(1))
+                mins   = int(m.group(2))
+                secs   = int(m.group(3)) if m.group(3) else 0
+                # "m:ss" formatida: h_or_m = daqiqa
+                total_sec = h_or_m * 60 + mins + (secs if m.group(3) else 0)
+                if m.group(3):
+                    # "h:mm:ss" formatida
+                    total_sec = h_or_m * 3600 + mins * 60 + secs
+                text = m.group(4).strip()
+                time_label = m.group(0).split(' ')[0]
+            else:
+                # Timestamp yo'q — oxirgiga qo'shib yubor
+                if lines:
+                    lines[-1] = (lines[-1][0], lines[-1][1], lines[-1][2] + ' ' + raw)
+                else:
+                    lines.append((0, '0:00', raw))
+                continue
+            if text:
+                lines.append((total_sec, time_label, text))
+
+    if not lines:
+        return None, None
+
+    segments = []
+    formatted = []
+    for i, (start, time_label, text) in enumerate(lines):
+        end = lines[i + 1][0] if i + 1 < len(lines) else start + 5
+        if end <= start:
+            end = start + 3
+        segments.append({
+            'start':      float(start),
+            'end':        float(end),
+            'text':       text,
+            'time_label': time_label,
+        })
+        formatted.append(f"{time_label} {text}")
+
+    return segments, "\n".join(formatted)
 
 
 def transcribe_with_timestamps(audio_path):
