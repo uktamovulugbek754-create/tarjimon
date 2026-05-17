@@ -443,8 +443,10 @@ async def synthesize_timed_speech(segments, total_ms):
     """
     Har bir segment uchun Edge TTS audio yaratadi va
     to'g'ri timestamp pozitsiyasiga joylashtiradi.
+    Agar TTS audio segment vaqt oynasidan uzun bo'lsa, tezlashtiriladi.
     """
     from pydub import AudioSegment as AS
+    from pydub.effects import speedup
     try:
         base = AS.silent(duration=max(total_ms, 2000))
 
@@ -466,7 +468,20 @@ async def synthesize_timed_speech(segments, total_ms):
             except Exception:
                 pass
 
-            pos = int(seg['start'] * 1000)
+            pos    = int(seg['start'] * 1000)
+            max_ms = int(seg['end'] * 1000) - pos
+
+            # Agar audio segment vaqt oynasidan uzun bo'lsa — tezlashtir va kes
+            if max_ms > 200 and len(seg_audio) > max_ms:
+                speed_factor = len(seg_audio) / max_ms
+                try:
+                    # pydub speedup maksimum ~10x ishonchli ishlaydi
+                    seg_audio = speedup(seg_audio, playback_speed=min(speed_factor, 10.0))
+                except Exception as sp_err:
+                    print(f"[synthesize] speedup xato (seg {i}): {sp_err}")
+                # Tezlashtirish yetarli bo'lmasa, vaqt oynasida kesib qo'yamiz
+                seg_audio = seg_audio[:max_ms]
+
             base = base.overlay(seg_audio, position=pos)
 
         out = os.path.join(app.config['UPLOAD_FOLDER'], 'dubbed_speech.mp3')
